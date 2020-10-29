@@ -1,4 +1,6 @@
 /*
+Copyright (c) 2020, TKVision Ltd.
+Based on
 Copyright (c) 2014, Pure Engineering LLC
 All rights reserved.
 
@@ -49,9 +51,12 @@ static uint8_t bits = 8;
 static uint32_t speed = 16000000;
 static uint16_t delay;
 
-#define VOSPI_FRAME_SIZE (164)
+#define VOSPI_FRAME_SIZE (164) // In Bytes
+#define VOSPI_PACKETS_PER_FRAME (60) // TELEMETRY DISABLED
+#define LEPTON3_FRAME_WIDTH (160) // In Pixels
+#define LEPTON3_FRAME_HEIGHT (120) // In Pixels
 uint8_t lepton_frame_packet[VOSPI_FRAME_SIZE];
-static unsigned int lepton_image[80][80];
+static unsigned int lepton_image[LEPTON3_FRAME_HEIGHT][LEPTON3_FRAME_WIDTH];
 
 static void save_pgm_file(void)
 {
@@ -65,8 +70,7 @@ static void save_pgm_file(void)
 	do {
 		sprintf(image_name, "IMG_%.4d.pgm", image_index);
 		image_index += 1;
-		if (image_index > 9999) 
-		{
+		if (image_index > 9999) {
 			image_index = 0;
 			break;
 		}
@@ -74,17 +78,14 @@ static void save_pgm_file(void)
 	} while (access(image_name, F_OK) == 0);
 
 	FILE *f = fopen(image_name, "w");
-	if (f == NULL)
-	{
+	if (f == NULL) {
 		printf("Error opening file!\n");
 		exit(1);
 	}
 
 	printf("Calculating min/max values for proper scaling...\n");
-	for(i=0;i<60;i++)
-	{
-		for(j=0;j<80;j++)
-		{
+	for(i=0;i<LEPTON3_FRAME_HEIGHT;i++) {
+		for(j=0;j<LEPTON3_FRAME_WIDTH;j++) {
 			if (lepton_image[i][j] > maxval) {
 				maxval = lepton_image[i][j];
 			}
@@ -95,12 +96,10 @@ static void save_pgm_file(void)
 	}
 	printf("maxval = %u\n",maxval);
 	printf("minval = %u\n",minval);
-	
-	fprintf(f,"P2\n80 60\n%u\n",maxval-minval);
-	for(i=0;i<60;i++)
-	{
-		for(j=0;j<80;j++)
-		{
+
+	fprintf(f,"P2\n160 120\n%u\n",maxval-minval);
+	for(i=0;i<LEPTON3_FRAME_HEIGHT;i++) {
+		for(j=0;j<LEPTON3_FRAME_WIDTH;j++) {
 			fprintf(f,"%d ", lepton_image[i][j] - minval);
 		}
 		fprintf(f,"\n");
@@ -133,9 +132,9 @@ int transfer(int fd)
 	{
 		frame_number = lepton_frame_packet[1];
 
-		if(frame_number < 60 )
+		if(frame_number < VOSPI_PACKETS_PER_FRAME )
 		{
-			for(i=0;i<80;i++)
+			for(i=0;i<LEPTON3_FRAME_WIDTH;i++)
 			{
 				lepton_image[frame_number][i] = (lepton_frame_packet[2*i+4] << 8 | lepton_frame_packet[2*i+5]);
 			}
@@ -144,11 +143,58 @@ int transfer(int fd)
 	return frame_number;
 }
 
+void usage(char *exec)
+{
+		printf("Usage: %s [options]\n"
+					 "Options:\n"
+					 "  -d | --device name       Use name as spidev device "
+							 "(/dev/spidev0.1 by default)\n"
+					 "  -h | --help              Print this message\n"
+					 "", exec);
+}
+
+static const char short_options [] = "d:h:";
+
+static const struct option long_options [] = {
+		{ "device",  required_argument, NULL, 'd' },
+		{ "help",    no_argument,       NULL, 'h' },
+		{ 0, 0, 0, 0 }
+};
+
 int main(int argc, char *argv[])
 {
 	int ret = 0;
 	int fd;
 
+	// processing command line parameters
+	for (;;) {
+			int index;
+			int c;
+
+			c = getopt_long(argc, argv,
+											short_options, long_options,
+											&index);
+
+			if (-1 == c)
+					break;
+
+			switch (c) {
+					case 0:
+							break;
+
+					case 'd':
+							spidev = optarg;
+							break;
+
+					case 'h':
+							usage(argv[0]);
+							exit(EXIT_SUCCESS);
+
+					default:
+							usage(argv[0]);
+							exit(EXIT_FAILURE);
+			}
+	}
 
 	fd = open(device, O_RDWR);
 	if (fd < 0)
@@ -196,7 +242,7 @@ int main(int argc, char *argv[])
 	printf("bits per word: %d\n", bits);
 	printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
 
-	while(transfer(fd)!=59){}
+	while(transfer(fd)!= (VOSPI_PACKETS_PER_FRAME - 1)){}
 
 	close(fd);
 
