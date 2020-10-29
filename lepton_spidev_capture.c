@@ -183,7 +183,7 @@ int main(int argc, char *argv[])
 							break;
 
 					case 'd':
-							spidev = optarg;
+							device = optarg;
 							break;
 
 					case 'h':
